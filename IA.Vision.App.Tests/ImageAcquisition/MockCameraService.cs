@@ -1,10 +1,10 @@
-﻿namespace AE.Vision.App.Tests.ImageAcquisition
+﻿namespace IA.Vision.App.Tests.ImageAcquisition
 {
     using System.Collections.Concurrent;
     using System.Threading.Tasks;
-    using AE.Vision.App.Interfaces;
-    using AE.Vision.App.Models;
-    using AE.Vision.App.Utils;
+    using IA.Vision.App.Interfaces;
+    using IA.Vision.App.Models;
+    using IA.Vision.App.Utils;
 
     public class MockCameraService : ICameraService
     {

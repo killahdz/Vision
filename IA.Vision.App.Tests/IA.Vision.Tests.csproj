@@ -19,8 +19,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AE.Vision.App\AE.Vision.App.csproj" />
-    <ProjectReference Include="..\AE.Vision.Rpc\AE.Vision.Rpc.csproj" />
+    <ProjectReference Include="..\IA.Vision.App\IA.Vision.Server.csproj" />
+    <ProjectReference Include="..\IA.Vision.Rpc\IA.Vision.Rpc.csproj" />
   </ItemGroup>
 
   <ItemGroup>
