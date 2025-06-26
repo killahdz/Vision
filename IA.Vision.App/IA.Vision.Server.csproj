@@ -9,6 +9,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Clients\**" />
+    <EmbeddedResource Remove="Clients\**" />
+    <None Remove="Clients\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Grpc.Net.Client" Version="2.70.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.6" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.6" />
@@ -24,8 +30,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\IA.Vision.Rpc\IA.Vision.Rpc.csproj" />
-    <ProjectReference Include="..\Tools\GenICam\GenICam.csproj" />
-    <ProjectReference Include="..\Tools\GigeVision.Core\GigeVision.Core.csproj" />
+    <ProjectReference Include="..\ThirdParty\GenICam\GenICam.csproj" />
+    <ProjectReference Include="..\ThirdParty\GigeVision.Core\GigeVision.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -68,10 +74,6 @@
     <None Update="Resources\JAI.xml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Clients\" />
   </ItemGroup>
 
 </Project>
