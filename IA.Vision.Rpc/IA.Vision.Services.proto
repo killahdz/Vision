@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package IA.Vision.Rpc.Services;
+
+import "google/protobuf/empty.proto";
+
+enum Version 
+{
+    VERSION_1_99 = 0;
+}
+
+enum ImageAcquisitionMode 
+{
+    IMAGEACQUISITIONMODE_RUN = 0;
+    IMAGEACQUISITIONMODE_Debug = 1;
+}
+
+message ImageStrip 
+{
+    int32 cameraID = 1;
+    int32 encoderValue = 2;
+    bytes image = 3;
+}
+
+message RetrieveImageRequest  
+{
+    int64 encoderValue = 1;
+    bool isValid = 2;
+}
+
+message RetrieveImageStreamRequest{
+}
+
+message Image 
+{
+    bytes data = 1;
+}
+
+message GenericResultResponse
+{
+    bool success = 1;
+    string message = 2;
+}
+
+message GetFullImageRequest
+{
+    int32 lugID = 1;
+    bool success = 2;
+}
+
+message GetLastErrorResponse
+{
+    string message = 1;
+}
+
+message SetModeRequest{
+    ImageAcquisitionMode mode = 1;
+}
+
+message StitchPayload
+{
+    bytes stripImage = 1;
+    map<int64, int64> imageProcessingStep = 2; //step id, time in us
+    bytes imageMat = 3; //opencv mat converted to bytes
+    int64 encoderValue = 4;
+    int64 lugId = 5;
+    bool clean = 6;
+    int32 port = 7;
+}
+
+message AssembledStitchPayload
+{
+    map<int64, StitchPayload> stripImages = 1;
+    bytes stitchedImageMat = 2; //opencv mat converted to bytes
+    map<int64, int64> imageProcessingStep = 3; //step id, time in us
+    int64 encoderValueStart = 4;
+    int64 encoderValueStop = 5;
+    bool clean = 6;    
+}
+
+message FinalStitchedImage
+{
+    bytes stitchedImageMat = 1; //opencv mat converted to bytes
+    map<int64, AssembledStitchPayload> stitchedPayload = 2;
+    map<int64, int64> imageProcessingStep = 3; //step id, time in us
+    bytes jpegThumbnail = 4;
+    bytes tiffImage = 5;
+    string creationTime = 6;
+
+    int64 lugId = 7;
+    int64 finalImageWidth = 8;
+    int64 finalImageHeight = 9;    
+}
+
+message NewLugRequest{
+}
+message NewLug{
+    int64 lugID = 1;
+    int64 encoderValue = 2;
+    double lugSize = 3;     
+}
+
+message ImageStripStreamRequest{
+}
+
+service ImageAcquisition 
+{
+    rpc RetrieveImageStream(RetrieveImageStreamRequest) returns (stream RetrieveImageRequest);
+    rpc SetMode(SetModeRequest) returns (GenericResultResponse); 
+}
+
+service ImageProcessing 
+{
+    rpc ImageStripStream(ImageStripStreamRequest) returns (stream ImageStrip);    
+}
+
+service LugProcessing{
+    rpc LugStream (NewLugRequest) returns (stream NewLug);
+}
+
+service BlockingImageProcessing
+{
+    rpc GetFullImage(GetFullImageRequest) returns (Image);
+    rpc GetLastError(google.protobuf.Empty) returns (GetLastErrorResponse);
+}

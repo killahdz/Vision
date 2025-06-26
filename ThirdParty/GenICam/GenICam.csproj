@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net5.0;net6.0</TargetFrameworks>
+    <Platforms>x64</Platforms>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Version>2.1.6</Version>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+	  <PackageReleaseNotes>
+		  2.1.5.1: 	Updated Docs
+	  </PackageReleaseNotes>
+  </PropertyGroup>
+
+
+  <ItemGroup>
+    <PackageReference Include="MathParser.org-mXparser" Version="5.0.7" />
+    <PackageReference Include="Prism.Core" Version="8.1.97" />
+    <PackageReference Include="StyleCop.Analyzers" Version="1.1.118">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+</Project>

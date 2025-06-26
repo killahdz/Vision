@@ -1,0 +1,60 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net5.0;net6.0</TargetFrameworks>
+    <Authors>Touseef Elahi</Authors>
+    <Company>Stira.sa</Company>
+    <Product>GigeVision</Product>
+    <Description>
+      Simple GigE Vision Implementation
+    </Description>
+    <PackageTags>GigeVision, GeniCam, GVSP, GVCP</PackageTags>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Version>2.5.2</Version>
+    <PackageLicenseFile>License.txt</PackageLicenseFile>
+    <PackageIcon>gige.png</PackageIcon>
+    <PackageIconUrl />
+    <Platforms>x64</Platforms>
+    <PackageReleaseNotes>
+		2.5.2: Fix Sync Status bug
+		2.5.1: Fix Multi network camera discovery
+		2.5: Add firewall exception and Custom Stream Receiver option enabled
+		2.4: Fix Get all registers, Force IP command, Documentation Added and .net5.0 support added
+		2.1.1: Upgraded to Netcore 6.0 with Multicast reception fix
+		1.8.0: Pushes the block id (frame number) in the frame event and Gives notification on frameloss
+		Fix Receiver IP Detection
+		Fix Discovery for all cameras in network
+	</PackageReleaseNotes>
+    <LangVersion>9.0</LangVersion>
+    <Configurations>Debug;Release;PublishLocally</Configurations>
+    <PackageProjectUrl>https://github.com/Touseefelahi/GigeVision</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="gige.png">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+    </None>
+    <None Include="Licenses\License.txt">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="GenICam" Version="2.1.5.1" />
+    <PackageReference Include="Stira.WpfCore" Version="1.2.2" />
+    <PackageReference Include="System.Drawing.Common" Version="4.7.0" />
+    <PackageReference Include="System.IO.Pipelines" Version="6.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GenICam\GenICam.csproj" />
+  </ItemGroup>
+
+  <!--<ItemGroup>
+    <ProjectReference Include="..\GenICam\GenICam.csproj" />
+  </ItemGroup>-->
+
+</Project>
