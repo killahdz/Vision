@@ -24,7 +24,6 @@ The system listens for encoder-triggered image requests via gRPC and orchestrate
 | `IA.Vision.Rpc`        | Protobuf/gRPC-generated contract services for encoder-image communication   |
 | `IA.Vision.App.Tests`  | Unit test suite (in progress)                                               |
 | `ThirdParty`           | External dependencies or integrations (e.g. GeniCam/GigEvision )            |
-|------------------------|-----------------------------------------------------------------------------|
 
 ---
 
@@ -68,23 +67,21 @@ The system listens for encoder-triggered image requests via gRPC and orchestrate
    git clone https://github.com/yourusername/VisionServer.git
 Open ImageAcquisition.sln in Visual Studio or Rider
 
-Build and run IA.Vision.App
-Configuration via:
+2. Ensure camera SDKs and encoder stream service are available
 
-appsettings.json
+3. Build and run IA.Vision.App
+ Configuration via: appsettings.json
 
-hostsettings.json
 
-Ensure camera SDKs and encoder stream service are available
 
-📄 License
+## 📄 License
 Licensed under the Apache License 2.0.
 © 2025 Daniel Kereama
 
-👤 About the Author
+## 👤 About the Author
 Daniel Kereama is a senior .NET engineer with 20+ years of experience in enterprise-grade systems, real-time image processing, and automation.
 Bringing hands-on expertise in architecture, performance-critical C# applications, and integrating hardware/software pipelines at scale.
 
-📨 Contact
+## 📨 Contact
 Want to connect?
 https://www.linkedin.com/in/danielkereama/
