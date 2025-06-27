@@ -95,7 +95,7 @@ All runtime behavior is controlled via `appsettings.json`:
 ## 📦 Getting Started
 
 1. Clone the repository:
-   `git clone https://github.com/yourusername/VisionServer.git`
+   `git clone https://github.com/killahdz/VisionServer.git`
 
 2. Open `ImageAcquisition.sln` in Visual Studio or Rider
 
