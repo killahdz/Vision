@@ -1,5 +1,26 @@
-﻿using System.Collections.Concurrent;
+﻿// --------------------------------------------------------------------------------------
+// Copyright 2025 Daniel Kereama
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// Author      : Daniel Kereama
+// Created     : 2025-06-27
+// --------------------------------------------------------------------------------------
+using System;
+using System.Collections.Concurrent;
+using System.Linq;
+using System.Threading;
 using System.Threading.Channels;
+using System.Threading.Tasks;
 using IA.Vision.App.Interfaces;
 using IA.Vision.App.Models;
 using IA.Vision.App.Utils;
@@ -13,182 +34,226 @@ using static IA.Vision.Rpc.Services.ImageAcquisition;
 
 namespace IA.Vision.App.Services
 {
+    /// <summary>
+    /// Implements the image acquisition service, managing camera connections, frame processing, and encoder stream communication.
+    /// </summary>
     public class ImageAcquisitionServiceImpl : ImageAcquisitionBase, IHostedService, IDisposable
     {
-        public readonly ServerOptions ServerOptions;
-        private readonly ILogger<ImageAcquisitionServiceImpl> logger;
-        private readonly VisionMonitorService monitorService;
-        private readonly CancellationTokenSource cancellationTokenSource = new();
-        private readonly FileWriteQueue fileWriteQueue;
-        public readonly IReadOnlyList<ICameraService> CameraServices;
-        public readonly ConcurrentDictionary<ICameraService, CameraStreamingService> CameraStreamingServices = new();
-        private readonly ConcurrentDictionary<ICameraService, TaskCompletionSource<bool>> cameraReadiness = new();
-        private readonly ConcurrentDictionary<ICameraService, SemaphoreSlim> cameraSemaphores = new();
-        private readonly ConcurrentDictionary<ICameraService, bool> cameraRetrying = new();
-        private readonly ConcurrentDictionary<ICameraService, Channel<ImageFrame>> frameProcessingChannels = new();
-        private readonly ConcurrentDictionary<ICameraService, Task> frameProcessingTasks = new();
+        private readonly ServerOptions _serverOptions;
+        public ServerOptions ServerOptions => _serverOptions;
+        private readonly ILogger<ImageAcquisitionServiceImpl> _logger;
+        private readonly VisionMonitorService _monitorService;
+        private readonly CancellationTokenSource _cancellationTokenSource = new();
+        private readonly FileWriteQueue _fileWriteQueue;
+        private readonly IReadOnlyList<ICameraService> _cameraServices;
+        public IReadOnlyList<ICameraService> CameraServices => _cameraServices;
+        private readonly ConcurrentDictionary<ICameraService, CameraStreamingService> _cameraStreamingServices = new();
+        public ConcurrentDictionary<ICameraService, CameraStreamingService> CameraStreamingServices => _cameraStreamingServices;
+        private readonly ConcurrentDictionary<ICameraService, TaskCompletionSource<bool>> _cameraReadiness = new();
+        private readonly ConcurrentDictionary<ICameraService, SemaphoreSlim> _cameraSemaphores = new();
+        private readonly ConcurrentDictionary<ICameraService, bool> _cameraRetrying = new();
+        private readonly ConcurrentDictionary<ICameraService, Channel<ImageFrame>> _frameProcessingChannels = new();
+        private readonly ConcurrentDictionary<ICameraService, Task> _frameProcessingTasks = new();
+        private GrpcChannel _encoderChannel;
+        private ImageAcquisitionClient _encoderStreamClient;
+        private Task _encoderStreamProcessingTask;
+        private Task _healthCheckTask;
+        private TelemetryTracker _telemetry;
+        private CancellationToken _cancellationToken;
+        private long _encoderValue;
+        private int _imageAcquisitionMode;
+        private static SemaphoreSlim _incomingRequestThrottle;
+        private int _disposed;
 
-        private GrpcChannel encoderChannel;
-        private ImageAcquisitionClient encoderStreamClient;
-        private Task encoderStreamProcessingTask;
-        private Task healthCheckTask;
-
-        private TelemetryTracker telemetry;
-        private CancellationToken cancellationToken;
-
-        private long encoderValue;
-
+        /// <summary>
+        /// Gets the current encoder value in a thread-safe manner.
+        /// </summary>
         public long EncoderValue
         {
-            get => Interlocked.Read(ref encoderValue);
-            private set => Interlocked.Exchange(ref encoderValue, value);
+            get => Interlocked.Read(ref _encoderValue);
+            private set => Interlocked.Exchange(ref _encoderValue, value);
         }
 
-        public int FileWriteQueueSize => fileWriteQueue?.GetQueueCountNoLock() ?? 0;
+        /// <summary>
+        /// Gets the current size of the file write queue.
+        /// </summary>
+        public int FileWriteQueueSize => _fileWriteQueue?.GetQueueCountNoLock() ?? 0;
 
-        private int imageAcquisitionMode;
-
+        /// <summary>
+        /// Gets or sets the image acquisition mode in a thread-safe manner.
+        /// </summary>
         public ImageAcquisitionMode ImageAcquisitionMode
         {
-            get => (ImageAcquisitionMode)Interlocked.CompareExchange(ref imageAcquisitionMode, 0, 0);
-            set => Interlocked.Exchange(ref imageAcquisitionMode, (int)value);
+            get => (ImageAcquisitionMode)Interlocked.CompareExchange(ref _imageAcquisitionMode, 0, 0);
+            set => Interlocked.Exchange(ref _imageAcquisitionMode, (int)value);
         }
 
-        public int TotalFrameProcessingChannelSize => frameProcessingChannels.Sum(kvp => kvp.Value.Reader.Count);
+        /// <summary>
+        /// Gets the total number of frames in all frame processing channels.
+        /// </summary>
+        public int TotalFrameProcessingChannelSize => _frameProcessingChannels.Sum(kvp => kvp.Value.Reader.Count);
 
         // Telemetry properties
-        public long TotalRequestsProcessed => telemetry.TotalRequestsProcessed;
+        public long TotalRequestsProcessed => _telemetry.TotalRequestsProcessed;
+        public long TotalCaptureRequests => _telemetry.TotalCaptureRequests;
+        public long TotalFramesProcessed => _telemetry.TotalFramesProcessed;
+        public long FailedRequests => _telemetry.FailedRequests;
+        public long DroppedFrames => _telemetry.DroppedFrames;
+        public int ActiveRequests => _telemetry.ActiveRequests;
+        public long TotalProcessingTimeMs => _telemetry.TotalProcessingTimeMs;
+        public DateTime StartTime => _telemetry.StartTime;
+        public double RequestsReceivedPerSecond => _telemetry.RequestsReceivedPerSecond;
+        public double RequestsSentPerSecond => _telemetry.RequestsSentPerSecond;
+        public bool IsEncoderStreamConnected => _telemetry.IsEncoderStreamConnected;
 
-        public long TotalCaptureRequests => telemetry.TotalCaptureRequests;
-        public long TotalFramesProcessed => telemetry.TotalFramesProcessed;
-        public long FailedRequests => telemetry.FailedRequests;
-        public long DroppedFrames => telemetry.DroppedFrames;
-        public int ActiveRequests => telemetry.ActiveRequests;
-        public long TotalProcessingTimeMs => telemetry.TotalProcessingTimeMs;
-        public DateTime StartTime => telemetry.StartTime;
-        public double RequestsReceivedPerSecond => telemetry.RequestsReceivedPerSecond;
-        public double RequestsSentPerSecond => telemetry.RequestsSentPerSecond;
+        /// <summary>
+        /// Gets the number of requests added to the stream for a specific camera.
+        /// </summary>
+        public long GetRequestsAddedToStream(int cameraId) => _telemetry.GetRequestsAddedToStream(cameraId);
 
-        public bool IsEncoderStreamConnected => telemetry.IsEncoderStreamConnected;
+        /// <summary>
+        /// Gets the number of requests read from the stream for a specific camera.
+        /// </summary>
+        public long GetRequestsReadFromStream(int cameraId) => _telemetry.GetRequestsReadFromStream(cameraId);
 
-        public long GetRequestsAddedToStream(int cameraId) => telemetry.GetRequestsAddedToStream(cameraId);
+        /// <summary>
+        /// Gets the rate of requests added per second for a specific camera.
+        /// </summary>
+        public double GetRequestsAddedPerSecond(int cameraId) => _telemetry.GetRequestsAddedPerSecond(cameraId);
 
-        public long GetRequestsReadFromStream(int cameraId) => telemetry.GetRequestsReadFromStream(cameraId);
+        /// <summary>
+        /// Gets the rate of requests read per second for a specific camera.
+        /// </summary>
+        public double GetRequestsReadPerSecond(int cameraId) => _telemetry.GetRequestsReadPerSecond(cameraId);
 
-        public double GetRequestsAddedPerSecond(int cameraId) => telemetry.GetRequestsAddedPerSecond(cameraId);
+        /// <summary>
+        /// Gets the number of errors from the stream for a specific camera.
+        /// </summary>
+        public long GetErrorsFromStream(int cameraId) => _telemetry.GetErrorsFromStream(cameraId);
 
-        public double GetRequestsReadPerSecond(int cameraId) => telemetry.GetRequestsReadPerSecond(cameraId);
-
-        public long GetErrorsFromStream(int cameraId) => telemetry.GetErrorsFromStream(cameraId);
-
-        public ConcurrentDictionary<int, int> CameraErrorCounts => telemetry.CameraErrorCounts;
-        private static SemaphoreSlim incomingRequestThrottle;
+        public ConcurrentDictionary<int, int> CameraErrorCounts => _telemetry.CameraErrorCounts;
 
         static ImageAcquisitionServiceImpl()
         {
-            incomingRequestThrottle = new SemaphoreSlim(370, 3700);
+            _incomingRequestThrottle = new SemaphoreSlim(370, 3700);
         }
 
+        /// <summary>
+        /// Initializes a new instance of the image acquisition service.
+        /// </summary>
+        /// <param name="cameraServices">The collection of camera services.</param>
+        /// <param name="logger">The logger for the service.</param>
+        /// <param name="cameraStreamLogger">The logger for camera streaming.</param>
+        /// <param name="visionMonitorService">The vision monitor service.</param>
+        /// <param name="serverOptions">The server configuration options.</param>
+        /// <param name="applicationLifetime">The application lifetime for shutdown handling.</param>
         public ImageAcquisitionServiceImpl(
             IEnumerable<ICameraService> cameraServices,
             ILogger<ImageAcquisitionServiceImpl> logger,
             ILogger<CameraStreamingService> cameraStreamLogger,
             VisionMonitorService visionMonitorService,
-            IOptions<ServerOptions> iServerOptions,
+            IOptions<ServerOptions> serverOptions,
             IHostApplicationLifetime applicationLifetime)
         {
-            this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            this.CameraServices = cameraServices?.ToList() ?? throw new ArgumentNullException(nameof(cameraServices));
-            this.ServerOptions = iServerOptions.Value;
-            this.monitorService = visionMonitorService;
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _cameraServices = cameraServices?.ToList() ?? throw new ArgumentNullException(nameof(cameraServices));
+            _serverOptions = serverOptions?.Value ?? throw new ArgumentNullException(nameof(serverOptions));
+            _monitorService = visionMonitorService ?? throw new ArgumentNullException(nameof(visionMonitorService));
+
             var fileOperationsLogger = VisionLoggerFactory.CreateFileOperationsLogger();
+            _fileWriteQueue = new FileWriteQueue(_cancellationTokenSource, _serverOptions.FileWriteQueue.MaxConcurrentWrites);
+            ImageAcquisitionMode = _serverOptions.ImageAcquisitionMode;
 
-            this.fileWriteQueue = new FileWriteQueue(cancellationTokenSource, ServerOptions.FileWriteQueue.MaxConcurrentWrites);
-            ImageAcquisitionMode = ServerOptions.ImageAcquisitionMode;
-
-            if (cameraServices.Count() > ServerOptions.MaxCameraConnections)
+            if (_cameraServices.Count > _serverOptions.MaxCameraConnections)
             {
-                throw new ArgumentException($"VisionServer supports up to {ServerOptions.MaxCameraConnections} cameras.");
+                throw new ArgumentException($"VisionServer supports up to {_serverOptions.MaxCameraConnections} cameras.");
             }
 
-            telemetry = new TelemetryTracker(ServerOptions.ErrorQueueCapacity, cancellationToken);
-            foreach (var camera in this.CameraServices)
+            _telemetry = new TelemetryTracker(_serverOptions.ErrorQueueCapacity, _cancellationToken, _logger);
+            foreach (var camera in _cameraServices)
             {
-                cameraReadiness[camera] = new TaskCompletionSource<bool>();
-                CameraStreamingServices[camera] = new CameraStreamingService(
-                    ServerOptions.IP,
+                _cameraReadiness[camera] = new TaskCompletionSource<bool>();
+                _cameraStreamingServices[camera] = new CameraStreamingService(
+                    _serverOptions.IP,
                     camera.Configuration.EndpointPort,
                     camera.Configuration.Id,
                     cameraStreamLogger,
                     applicationLifetime,
-                    telemetry);
-                cameraSemaphores[camera] = new SemaphoreSlim(1, 1);
-                frameProcessingChannels[camera] = System.Threading.Channels.Channel.CreateBounded<ImageFrame>(new BoundedChannelOptions(ServerOptions.FrameProcessingChannel.Capacity)
+                    _telemetry);
+                _cameraSemaphores[camera] = new SemaphoreSlim(1, 1);
+                _frameProcessingChannels[camera] = System.Threading.Channels.Channel.CreateBounded<ImageFrame>(new BoundedChannelOptions(_serverOptions.FrameProcessingChannel.Capacity)
                 {
-                    FullMode = Enum.Parse<BoundedChannelFullMode>(ServerOptions.FrameProcessingChannel.FullMode)
+                    FullMode = Enum.Parse<BoundedChannelFullMode>(_serverOptions.FrameProcessingChannel.FullMode)
                 });
                 camera.OnStreamingStopped += () => Camera_OnStreamingStopped(camera);
             }
 
-            if (ServerOptions.IncomingConcurrentRequestLimit > 0)
+            if (_serverOptions.IncomingConcurrentRequestLimit > 0)
             {
-                incomingRequestThrottle = new SemaphoreSlim(ServerOptions.IncomingConcurrentRequestLimit, ServerOptions.IncomingConcurrentRequestLimit);
+                _incomingRequestThrottle.Dispose();
+                _incomingRequestThrottle = new SemaphoreSlim(_serverOptions.IncomingConcurrentRequestLimit, _serverOptions.IncomingConcurrentRequestLimit);
             }
         }
 
+        /// <summary>
+        /// Starts the image acquisition service, initializing camera connections and processing tasks.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token for the operation.</param>
+        /// <returns>A task representing the asynchronous start operation.</returns>
         public async Task StartAsync(CancellationToken cancellationToken)
         {
             if (cancellationToken.IsCancellationRequested)
             {
-                logger.LogInformation("StartAsync cancelled before execution");
+                _logger.LogInformation("StartAsync cancelled before execution.");
                 return;
             }
 
             try
             {
-                this.cancellationToken = cancellationToken;
+                _cancellationToken = cancellationToken;
 
-                // Validate configuration
-                if (CameraServices == null || !CameraServices.Any())
+                if (_cameraServices == null || !_cameraServices.Any())
                 {
-                    throw new InvalidOperationException("No camera services configured");
+                    throw new InvalidOperationException("No camera services configured.");
                 }
 
-                logger.LogInformation("Starting Vision Server...");
+                _logger.LogInformation("Starting Vision Server...");
 
-                // Start health monitoring first
-                healthCheckTask = HealthCheckRunAsync(cancellationToken);
+                _healthCheckTask = HealthCheckRunAsync(cancellationToken);
 
-                // Initialize frame processing tasks (these can run in parallel as they await frames)
-                foreach (var camera in CameraServices)
+                foreach (var camera in _cameraServices)
                 {
-                    frameProcessingTasks[camera] = StartFrameProcessingAsync(camera, cancellationToken);
-                }
-                // Start processing the encoder stream
-                encoderStreamProcessingTask = ProcessEncoderStreamAsync(cancellationToken);
-
-                // Staggered serial startup for camera connections
-                foreach (var camera in CameraServices)
-                {
-                    logger.LogInformation("Initiating connection for camera {Id}", camera.Configuration.Id);
-                    await ConnectCameraAsync(camera); // Run serially
+                    _frameProcessingTasks[camera] = StartFrameProcessingAsync(camera, cancellationToken);
                 }
 
-                logger.LogInformation("Vision Server started. All cameras initiated serially.");
+                _encoderStreamProcessingTask = ProcessEncoderStreamAsync(cancellationToken);
+
+                foreach (var camera in _cameraServices)
+                {
+                    _logger.LogInformation("Initiating connection for camera {Id}.", camera.Configuration.Id);
+                    await ConnectCameraAsync(camera);
+                }
+
+                _logger.LogInformation("Vision Server started. All cameras initiated.");
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Failed to start Vision Server");
+                _logger.LogError(ex, "Failed to start Vision Server.");
                 throw;
             }
         }
 
+        /// <summary>
+        /// Stops the image acquisition service, shutting down tasks and connections.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token for the operation.</param>
+        /// <returns>A task representing the asynchronous stop operation.</returns>
         public async Task StopAsync(CancellationToken cancellationToken)
         {
-            logger.LogInformation("Stopping Vision Server...");
-            cancellationTokenSource.Cancel();
+            _logger.LogInformation("Stopping Vision Server...");
+            _cancellationTokenSource.Cancel();
 
-            await fileWriteQueue.WaitForCompletionAsync();
+            await _fileWriteQueue.WaitForCompletionAsync();
 
             var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             var combinedCt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token).Token;
@@ -196,91 +261,97 @@ namespace IA.Vision.App.Services
             try
             {
                 await Task.WhenAll(
-                 frameProcessingTasks.Values.Select(t => t.DisposeWithTimeoutAsync(TimeSpan.FromSeconds(5), combinedCt))
-                     .Concat(new[] { healthCheckTask.DisposeWithTimeoutAsync(TimeSpan.FromSeconds(5), combinedCt) })
-                     .Concat(new[] { encoderStreamProcessingTask.DisposeWithTimeoutAsync(TimeSpan.FromSeconds(5), combinedCt) })
-                     .Concat(CameraStreamingServices.Values.Select(s => s.ShutdownAsync())));
+                    _frameProcessingTasks.Values.Select(t => t.DisposeWithTimeoutAsync(TimeSpan.FromSeconds(5), combinedCt, _logger))
+                        .Concat(new[] { _healthCheckTask.DisposeWithTimeoutAsync(TimeSpan.FromSeconds(5), combinedCt, _logger) })
+                        .Concat(new[] { _encoderStreamProcessingTask.DisposeWithTimeoutAsync(TimeSpan.FromSeconds(5), combinedCt, _logger) })
+                        .Concat(_cameraStreamingServices.Values.Select(s => s.ShutdownAsync())));
             }
             catch (TaskCanceledException)
             {
-                logger.LogWarning("Some tasks did not complete within the timeout and were canceled.");
+                _logger.LogWarning("Some tasks did not complete within the timeout and were canceled.");
             }
 
-            await Task.WhenAll(CameraServices.Select(async camera =>
+            await Task.WhenAll(_cameraServices.Select(async camera =>
             {
                 await camera.StopStreamingAsync();
                 await camera.DisconnectAsync();
-                frameProcessingChannels[camera].Writer.TryComplete();
-                logger.LogInformation($"Camera {camera.Configuration.Name} stopped successfully.");
+                _frameProcessingChannels[camera].Writer.TryComplete();
+                _logger.LogInformation("Camera {Name} stopped successfully.", camera.Configuration.Name);
             }));
 
-            await encoderChannel.ShutdownAsync();
-            logger.LogInformation("Image Acquisition Service stopped successfully.");
-
-            logger.LogInformation("Vision Server stopped successfully.");
+            if (_encoderChannel != null)
+            {
+                await _encoderChannel.ShutdownAsync();
+            }
+            _logger.LogInformation("Image Acquisition Service stopped successfully.");
         }
 
+        /// <summary>
+        /// Processes the encoder stream, handling incoming image requests.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token for the operation.</param>
+        /// <returns>A task representing the asynchronous processing operation.</returns>
         private async Task ProcessEncoderStreamAsync(CancellationToken cancellationToken)
         {
-            var streamHostAddress = $"http://{ServerOptions.EncoderStreamSettings.EncoderStreamAddress}:{ServerOptions.EncoderStreamSettings.EncoderStreamPort}";
-            logger.LogInformation($"Connecting to EncoderStream at {streamHostAddress}");
-            encoderChannel = GrpcChannel.ForAddress(streamHostAddress);
-            encoderStreamClient = new ImageAcquisitionClient(encoderChannel);
+            var streamHostAddress = $"http://{_serverOptions.EncoderStreamSettings.EncoderStreamAddress}:{_serverOptions.EncoderStreamSettings.EncoderStreamPort}";
+            _logger.LogInformation("Connecting to EncoderStream at {Address}.", streamHostAddress);
+            _encoderChannel = GrpcChannel.ForAddress(streamHostAddress);
+            _encoderStreamClient = new ImageAcquisitionClient(_encoderChannel);
 
-            var retryDelay = TimeSpan.FromMilliseconds(ServerOptions.EncoderStreamSettings.InitialRetryDelayMs);
-            var maxRetryDelay = TimeSpan.FromMilliseconds(ServerOptions.EncoderStreamSettings.MaxRetryDelayMs);
+            var retryDelay = TimeSpan.FromMilliseconds(_serverOptions.EncoderStreamSettings.InitialRetryDelayMs);
+            var maxRetryDelay = TimeSpan.FromMilliseconds(_serverOptions.EncoderStreamSettings.MaxRetryDelayMs);
             int attempt = 0;
 
             while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
-                    logger.LogInformation("Connecting to VisionEncoderStream (attempt {Attempt})...", attempt + 1);
-                    var call = encoderStreamClient.RetrieveImageStream(new RetrieveImageStreamRequest(), cancellationToken: cancellationToken);
+                    _logger.LogInformation("Connecting to VisionEncoderStream (attempt {Attempt})...", attempt + 1);
+                    var call = _encoderStreamClient.RetrieveImageStream(new RetrieveImageStreamRequest(), cancellationToken: cancellationToken);
                     attempt++;
 
-                    bool firstMessageReceived = false; // Track if we've set the connected state
+                    bool firstMessageReceived = false;
                     await foreach (var request in call.ResponseStream.ReadAllAsync(cancellationToken))
                     {
                         if (!firstMessageReceived)
                         {
-                            telemetry.SetEncoderStreamConnected(true); // Record connection on first message
-                            logger.LogInformation("Encoder stream connection confirmed.");
+                            _telemetry.SetEncoderStreamConnected(true);
+                            _logger.LogInformation("Encoder stream connection confirmed.");
                             firstMessageReceived = true;
                         }
 
-                        telemetry.IncrementRequestsProcessed();
+                        _telemetry.IncrementRequestsProcessed();
                         TrackEncoderValue(request.EncoderValue);
 
                         if (!request.IsValid)
                         {
-                            logger.LogDebug("Received invalid request: Encoder={Encoder}", request.EncoderValue);
+                            _logger.LogDebug("Received invalid request: Encoder={Encoder}.", request.EncoderValue);
                             continue;
                         }
 
-                        telemetry.IncrementCaptureRequests();
-                        await incomingRequestThrottle.WaitAsync(cancellationToken);
+                        _telemetry.IncrementCaptureRequests();
+                        await _incomingRequestThrottle.WaitAsync(cancellationToken);
                         try
                         {
-                            telemetry.IncrementActiveRequests();
+                            _telemetry.IncrementActiveRequests();
                             var requestTimeStamp = DateTimeOffset.UtcNow;
-                            await Task.WhenAll(CameraServices
+                            await Task.WhenAll(_cameraServices
                                 .Where(c => c.IsConnected && c.IsStreaming)
                                 .Select(camera => CaptureAndProcessFrameAsync(camera, request, requestTimeStamp)));
                         }
                         finally
                         {
-                            incomingRequestThrottle.Release();
-                            telemetry.DecrementActiveRequests();
+                            _incomingRequestThrottle.Release();
+                            _telemetry.DecrementActiveRequests();
                         }
                     }
 
-                    logger.LogInformation("VisionEncoderStream ended cleanly.");
+                    _logger.LogInformation("VisionEncoderStream ended cleanly.");
                     break;
                 }
                 catch (RpcException ex)
                 {
-                    logger.LogError($"Failed to connect to VisionEncoderStream (attempt {attempt}). Retrying in {retryDelay.TotalMilliseconds}ms...");
+                    _logger.LogError(ex, "Failed to connect to VisionEncoderStream (attempt {Attempt}). Retrying in {DelayMs}ms...", attempt, retryDelay.TotalMilliseconds);
                     if (!cancellationToken.IsCancellationRequested)
                     {
                         await Task.Delay(retryDelay, cancellationToken);
@@ -289,144 +360,168 @@ namespace IA.Vision.App.Services
                 }
                 catch (OperationCanceledException)
                 {
-                    logger.LogInformation("Encoder stream processing canceled.");
+                    _logger.LogInformation("Encoder stream processing canceled.");
                     break;
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Unexpected error in VisionEncoderStream processing (attempt {Attempt}). Retrying in {DelayMs}ms...", attempt, retryDelay.TotalMilliseconds);
+                    _logger.LogError(ex, "Unexpected error in VisionEncoderStream processing (attempt {Attempt}). Retrying in {DelayMs}ms...", attempt, retryDelay.TotalMilliseconds);
                     await Task.Delay(retryDelay, cancellationToken);
                     retryDelay = TimeSpan.FromTicks(Math.Min(retryDelay.Ticks * 2, maxRetryDelay.Ticks));
                 }
             }
 
-            logger.LogInformation("Encoder stream processing task completed.");
+            _logger.LogInformation("Encoder stream processing task completed.");
         }
 
+        /// <summary>
+        /// Sets the image acquisition mode via gRPC request.
+        /// </summary>
+        /// <param name="request">The mode change request.</param>
+        /// <param name="context">The server call context.</param>
+        /// <returns>A response indicating the success or failure of the mode change.</returns>
         public override async Task<GenericResultResponse> SetMode(SetModeRequest request, ServerCallContext context)
         {
             try
             {
                 if (ImageAcquisitionMode == request.Mode)
+                {
                     return new GenericResultResponse { Success = true, Message = $"Image acquisition mode is already set to {request.Mode}." };
+                }
 
                 ImageAcquisitionMode = request.Mode;
-                logger.LogInformation("Image acquisition mode set to: {Mode}", ImageAcquisitionMode);
+                _logger.LogInformation("Image acquisition mode set to: {Mode}.", ImageAcquisitionMode);
                 return new GenericResultResponse { Success = true, Message = $"Image acquisition mode changed to {ImageAcquisitionMode}." };
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error setting image acquisition mode.");
+                _logger.LogError(ex, "Error setting image acquisition mode.");
                 return new GenericResultResponse { Success = false, Message = "An error occurred while setting the image acquisition mode." };
             }
         }
 
+        /// <summary>
+        /// Connects a camera service with retry logic until successful.
+        /// </summary>
+        /// <param name="camera">The camera service to connect.</param>
+        /// <returns>A task representing the asynchronous connection operation.</returns>
         private async Task ConnectCameraAsync(ICameraService camera)
         {
             Thread.CurrentThread.Name = $"CameraConnectThread_{camera.Configuration.Id}";
-            while (!cancellationToken.IsCancellationRequested)
+            while (!_cancellationToken.IsCancellationRequested)
             {
                 try
                 {
                     await RetryUntilConnectedAsync(camera);
-                    logger.LogInformation("Camera {Id} connected and streaming.", camera.Configuration.Id);
-                    cameraReadiness[camera].TrySetResult(true);
+                    _logger.LogInformation("Camera {Id} connected and streaming.", camera.Configuration.Id);
+                    _cameraReadiness[camera].TrySetResult(true);
                     break;
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Error in camera {Id} connection loop.", camera.Configuration.Id);
-                    telemetry.AddError(camera.Configuration.Id, $"Initial connection failed: {ex.Message}. Retrying...", logger);
-                    await Task.Delay(TimeSpan.FromMilliseconds(ServerOptions.RetrySettings.InitialRetryDelayMs), cancellationToken);
+                    _logger.LogError(ex, "Error in camera {Id} connection loop.", camera.Configuration.Id);
+                    _telemetry.AddError(camera.Configuration.Id, $"Initial connection failed: {ex.Message}. Retrying...", _logger);
+                    await Task.Delay(TimeSpan.FromMilliseconds(_serverOptions.RetrySettings.InitialRetryDelayMs), _cancellationToken);
                 }
             }
         }
 
+        /// <summary>
+        /// Captures and processes a frame from a camera based on an encoder request.
+        /// </summary>
+        /// <param name="camera">The camera service to capture from.</param>
+        /// <param name="request">The image request containing encoder value.</param>
+        /// <param name="requestTimestamp">The timestamp of the request.</param>
+        /// <returns>A task representing the asynchronous capture and processing operation.</returns>
         private async Task CaptureAndProcessFrameAsync(ICameraService camera, RetrieveImageRequest request, DateTimeOffset requestTimestamp)
         {
             if (!request.IsValid) return;
 
             ImageFrame frame;
-            await cameraSemaphores[camera].WaitAsync();
+            await _cameraSemaphores[camera].WaitAsync();
             try
             {
                 frame = camera.GetFrameByEncoderValue(request.EncoderValue) ?? new();
             }
             finally
             {
-                cameraSemaphores[camera].Release();
+                _cameraSemaphores[camera].Release();
             }
 
             if (frame?.Data.Length > 0)
             {
-                bool syncLogginActive = false; //dumb switch
-                if (syncLogginActive)
+                bool syncLoggingActive = false;
+                if (syncLoggingActive)
                 {
-                    // Offload Synch logging to a separate task
                     _ = Task.Run(() =>
-                {
-                    // Calculate sync metrics
-                    long deltaEncoder = request.EncoderValue - frame.EncoderValue;
-                    double deltaTimeMs = (requestTimestamp - frame.Timestamp).TotalMilliseconds;
+                    {
+                        long deltaEncoder = request.EncoderValue - frame.EncoderValue;
+                        double deltaTimeMs = (requestTimestamp - frame.Timestamp).TotalMilliseconds;
+                        bool isOutOfSync = deltaEncoder != 0 || Math.Abs(deltaTimeMs) > 50;
 
-                    // Define out-of-sync conditions (adjust thresholds as needed)
-                    bool isOutOfSync = deltaEncoder != 0 || Math.Abs(deltaTimeMs) > 50; // Example: > 50ms delay
-
-                    // Log with a prefix for out-of-sync cases
-                    logger.LogInformation(
-                        "{SyncTag}Camera[{CameraId}] Frame captured: " +
-                        "RequestEncoder={RequestEncoder}, RequestTimestamp={RequestTimestamp}, " +
-                        "ServedEncoder={ServedEncoder}, ServedTimestamp={ServedTimestamp}, " +
-                        "DeltaEncoder={DeltaEncoder}, DeltaTimeMs={DeltaTimeMs}, DataSize={DataSize}b",
-                        isOutOfSync ? "[SYNC-ISSUE] " : "",  // Prefix for out-of-sync cases
-                        camera.Configuration.Id,
-                        request.EncoderValue, requestTimestamp,
-                        frame.EncoderValue, frame.Timestamp,
-                        deltaEncoder, deltaTimeMs,
-                        frame.Data.Length
-                    );
-                });
+                        _logger.LogInformation(
+                            "{SyncTag}Camera[{CameraId}] Frame captured: RequestEncoder={RequestEncoder}, RequestTimestamp={RequestTimestamp}, ServedEncoder={ServedEncoder}, ServedTimestamp={ServedTimestamp}, DeltaEncoder={DeltaEncoder}, DeltaTimeMs={DeltaTimeMs}, DataSize={DataSize}b",
+                            isOutOfSync ? "[SYNC-ISSUE] " : "",
+                            camera.Configuration.Id,
+                            request.EncoderValue, requestTimestamp,
+                            frame.EncoderValue, frame.Timestamp,
+                            deltaEncoder, deltaTimeMs,
+                            frame.Data.Length
+                        );
+                    });
                 }
-                if (!frameProcessingChannels[camera].Writer.TryWrite(frame))
+
+                if (!_frameProcessingChannels[camera].Writer.TryWrite(frame))
                 {
-                    telemetry.IncrementDroppedFrames();
-                    logger.LogWarning($"Frame dropped due to full queue for camera {camera.Configuration.Id}. Encoder: {request.EncoderValue} Timestamp: {requestTimestamp}");
+                    _telemetry.IncrementDroppedFrames();
+                    _logger.LogWarning("Frame dropped due to full queue for camera {Id}. Encoder: {Encoder} Timestamp: {Timestamp}.", camera.Configuration.Id, request.EncoderValue, requestTimestamp);
                 }
             }
             else
             {
-                logger.LogWarning($"No Frame Data. Camera[{camera.Configuration.Id}] E: {request.EncoderValue}");
+                _logger.LogWarning("No Frame Data. Camera[{Id}] E: {Encoder}.", camera.Configuration.Id, request.EncoderValue);
             }
         }
 
+        /// <summary>
+        /// Starts processing frames for a specific camera from its channel.
+        /// </summary>
+        /// <param name="camera">The camera service to process frames for.</param>
+        /// <param name="cancellationToken">The cancellation token for the operation.</param>
+        /// <returns>A task representing the asynchronous frame processing operation.</returns>
         private async Task StartFrameProcessingAsync(ICameraService camera, CancellationToken cancellationToken)
         {
-            var loggingScope = $" ♣ Frame Processing Channel [Camera {camera.Configuration.Id}]";
+            var loggingScope = $"Frame Processing Channel [Camera {camera.Configuration.Id}]";
             Thread.CurrentThread.Name = $"FrameProcessingThread_{camera.Configuration.Id}";
-            logger.LogInformation($"{loggingScope} Awaiting work.");
+            _logger.LogInformation("{Scope} Awaiting work.", loggingScope);
 
             try
             {
-                await foreach (var frame in frameProcessingChannels[camera].Reader.ReadAllAsync(cancellationToken))
+                await foreach (var frame in _frameProcessingChannels[camera].Reader.ReadAllAsync(cancellationToken))
                 {
-                    logger.LogInformation($"{loggingScope} received: {frame.Data.Length}b E:{frame.EncoderValue} | Frames: {TotalFramesProcessed}");
+                    _logger.LogInformation("{Scope} received: {Size}b E:{Encoder} | Frames: {TotalFrames}.", loggingScope, frame.Data.Length, frame.EncoderValue, TotalFramesProcessed);
                     await ProcessFrameAsync(frame);
                 }
             }
             catch (OperationCanceledException)
             {
-                logger.LogInformation($"{loggingScope} cancelled.");
+                _logger.LogInformation("{Scope} cancelled.", loggingScope);
             }
             finally
             {
-                logger.LogInformation($"{loggingScope} stopped.");
+                _logger.LogInformation("{Scope} stopped.", loggingScope);
             }
         }
 
+        /// <summary>
+        /// Processes a single frame, sending it to the stream or saving it to disk based on mode.
+        /// </summary>
+        /// <param name="frame">The frame to process.</param>
+        /// <returns>A task representing the asynchronous frame processing operation.</returns>
         private async Task ProcessFrameAsync(ImageFrame frame)
         {
-            var cameraService = CameraServices.FirstOrDefault(c => c.Configuration.Id == frame.CameraId);
-            if (cameraService == null || !CameraStreamingServices.TryGetValue(cameraService, out var cameraStream)) return;
+            var cameraService = _cameraServices.FirstOrDefault(c => c.Configuration.Id == frame.CameraId);
+            if (cameraService == null || !_cameraStreamingServices.TryGetValue(cameraService, out var cameraStream)) return;
 
             try
             {
@@ -437,51 +532,52 @@ namespace IA.Vision.App.Services
                     EncoderValue = (int)frame.RequestEncoderValue
                 };
 
-                if (!ServerOptions.ImageProcessingClientSkip)
+                if (!_serverOptions.ImageProcessingClientSkip)
                 {
-                    if (cameraStream != null)
-                    {
-                        cameraStream.PostImageStrip(imageStrip);
-                        logger.LogDebug("Posted image strip to stream for Camera ID {CameraId}", frame.CameraId);
-                    }
+                    cameraStream.PostImageStrip(imageStrip);
+                    _logger.LogDebug("Posted image strip to stream for Camera ID {CameraId}.", frame.CameraId);
                 }
 
                 if (ImageAcquisitionMode == ImageAcquisitionMode.Debug)
                 {
-                    var basePath = ServerOptions.DebugImageSettings.BasePath;
-                    var folderPath = ServerOptions.DebugImageSettings.UseCameraIdSubfolder
+                    var basePath = _serverOptions.DebugImageSettings.BasePath;
+                    var folderPath = _serverOptions.DebugImageSettings.UseCameraIdSubfolder
                         ? Path.Combine(basePath, frame.CameraId.ToString())
                         : basePath;
-                    folderPath = ServerOptions.DebugImageSettings.UseDateSubfolder
+                    folderPath = _serverOptions.DebugImageSettings.UseDateSubfolder
                         ? Path.Combine(folderPath, frame.Timestamp.ToString("yyyy-MM-dd"))
                         : folderPath;
                     var filePath = Path.Combine(folderPath, $"Frame_{frame.Timestamp:HH-mm-ss-ffffff}-{frame.Timestamp.Ticks}-E-{frame.EncoderValue}.raw");
-                    fileWriteQueue.EnqueueWrite(frame.Data, filePath, frame.Width, frame.Height);
+                    _fileWriteQueue.EnqueueWrite(frame.Data, filePath, frame.Width, frame.Height);
                 }
 
                 var processingTime = DateTime.UtcNow - frame.Timestamp;
-                telemetry.AddProcessingTime(processingTime.Milliseconds);
-                telemetry.IncrementFramesProcessed();
+                _telemetry.AddProcessingTime(processingTime.Milliseconds);
+                _telemetry.IncrementFramesProcessed();
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error processing frame for Camera ID {CameraId}.", frame.CameraId);
-                telemetry.AddError(cameraService.Configuration.Id, $"Frame processing failed: {ex.Message}", logger);
+                _logger.LogError(ex, "Error processing frame for Camera ID {CameraId}.", frame.CameraId);
+                _telemetry.AddError(cameraService.Configuration.Id, $"Frame processing failed: {ex.Message}", _logger);
             }
         }
 
+        /// <summary>
+        /// Handles the event when a camera stops streaming, initiating a retry.
+        /// </summary>
+        /// <param name="camera">The camera service that stopped streaming.</param>
         private void Camera_OnStreamingStopped(ICameraService camera)
         {
-            logger.LogWarning("Camera_OnStreamingStopped Event Fired for {camera}", camera.Configuration.CameraAddress);
+            _logger.LogWarning("Camera_OnStreamingStopped Event Fired for {Address}.", camera.Configuration.CameraAddress);
             _ = Task.Run(async () =>
             {
-                if (cameraRetrying.TryGetValue(camera, out var isRetrying) && isRetrying) return;
+                if (_cameraRetrying.TryGetValue(camera, out var isRetrying) && isRetrying) return;
 
-                await cameraSemaphores[camera].WaitAsync(cancellationToken);
+                await _cameraSemaphores[camera].WaitAsync(_cancellationToken);
                 try
                 {
                     Thread.CurrentThread.Name = $"CameraRetryThread_{camera.Configuration.Id}";
-                    cameraRetrying[camera] = true;
+                    _cameraRetrying[camera] = true;
 
                     try
                     {
@@ -489,34 +585,43 @@ namespace IA.Vision.App.Services
                     }
                     catch (Exception ex)
                     {
-                        telemetry.AddError(camera.Configuration.Id, $"Cleanup failed before retry: {ex.Message}", logger);
+                        _telemetry.AddError(camera.Configuration.Id, $"Cleanup failed before retry: {ex.Message}", _logger);
                     }
 
                     await RetryUntilConnectedAsync(camera);
                 }
                 finally
                 {
-                    cameraRetrying[camera] = false;
-                    cameraSemaphores[camera].Release();
+                    _cameraRetrying[camera] = false;
+                    _cameraSemaphores[camera].Release();
                 }
-            }, cancellationToken);
+            }, _cancellationToken);
         }
 
+        /// <summary>
+        /// Updates the encoder value and propagates it to all cameras.
+        /// </summary>
+        /// <param name="encoderValue">The new encoder value.</param>
         private void TrackEncoderValue(long encoderValue)
         {
             if (EncoderValue == encoderValue) return;
             EncoderValue = encoderValue;
-            logger.LogInformation($" ? Encoder updated: {encoderValue}");
-            foreach (var camera in CameraServices)
+            _logger.LogInformation("Encoder updated: {Value}.", encoderValue);
+            foreach (var camera in _cameraServices)
             {
                 camera.EncoderValue = encoderValue;
             }
         }
 
+        /// <summary>
+        /// Retries connecting and streaming a camera until successful.
+        /// </summary>
+        /// <param name="cameraService">The camera service to connect.</param>
+        /// <returns>A task representing the asynchronous retry operation.</returns>
         private async Task RetryUntilConnectedAsync(ICameraService cameraService)
         {
-            var retryDelay = TimeSpan.FromMilliseconds(ServerOptions.RetrySettings.InitialRetryDelayMs);
-            var maxRetryDelay = TimeSpan.FromMilliseconds(ServerOptions.RetrySettings.MaxRetryDelayMs);
+            var retryDelay = TimeSpan.FromMilliseconds(_serverOptions.RetrySettings.InitialRetryDelayMs);
+            var maxRetryDelay = TimeSpan.FromMilliseconds(_serverOptions.RetrySettings.MaxRetryDelayMs);
 
             while (!cameraService.IsConnected || !cameraService.IsStreaming)
             {
@@ -524,60 +629,93 @@ namespace IA.Vision.App.Services
                 {
                     if (!cameraService.IsConnected && await cameraService.ConnectAsync())
                     {
-                        logger.LogDebug("Connected to camera: {IP}", cameraService.Configuration.CameraAddress);
+                        _logger.LogDebug("Connected to camera: {Address}.", cameraService.Configuration.CameraAddress);
                         await Task.Delay(TimeSpan.FromSeconds(1));
                     }
                     else if (!cameraService.IsConnected)
                     {
                         await cameraService.DisconnectAsync();
-                        telemetry.AddError(cameraService.Configuration.Id, cameraService.LastError ?? "Unknown connection error", logger);
+                        _telemetry.AddError(cameraService.Configuration.Id, cameraService.LastError ?? "Unknown connection error", _logger);
                     }
 
                     if (cameraService.IsConnected && !cameraService.IsStreaming && await cameraService.StartStreamingAsync())
                     {
-                        logger.LogInformation("Camera is streaming: {IP}", cameraService.Configuration.CameraAddress);
-                        cameraReadiness[cameraService].TrySetResult(true);
+                        _logger.LogInformation("Camera is streaming: {Address}.", cameraService.Configuration.CameraAddress);
+                        _cameraReadiness[cameraService].TrySetResult(true);
                         return;
                     }
                     else if (cameraService.IsConnected)
                     {
-                        telemetry.AddError(cameraService.Configuration.Id, "Failed to start streaming", logger);
+                        _telemetry.AddError(cameraService.Configuration.Id, "Failed to start streaming", _logger);
                     }
                 }
                 catch (Exception ex)
                 {
-                    telemetry.AddError(cameraService.Configuration.Id, $"Unexpected Error: {ex.Message}", logger);
+                    _telemetry.AddError(cameraService.Configuration.Id, $"Unexpected Error: {ex.Message}", _logger);
                 }
 
-                await Task.Delay(retryDelay, cancellationToken);
+                await Task.Delay(retryDelay, _cancellationToken);
                 retryDelay = TimeSpan.FromTicks(Math.Min(retryDelay.Ticks * 2, maxRetryDelay.Ticks));
             }
         }
 
-        public void AddError(ICameraService camera, string error) => telemetry.AddError(camera.Configuration.Id, error, logger);
+        /// <summary>
+        /// Records an error for a specific camera.
+        /// </summary>
+        /// <param name="camera">The camera service with the error.</param>
+        /// <param name="error">The error message.</param>
+        public void AddError(ICameraService camera, string error) => _telemetry.AddError(camera.Configuration.Id, error, _logger);
 
+        /// <summary>
+        /// Runs periodic health checks for the service.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token for the operation.</param>
+        /// <returns>A task representing the asynchronous health check operation.</returns>
         private async Task HealthCheckRunAsync(CancellationToken cancellationToken)
         {
             Thread.CurrentThread.Name = "HealthCheckThread";
-            if (!ServerOptions.CameraHealth.EnableLogging) return;
+            if (!_serverOptions.CameraHealth.EnableLogging) return;
 
             while (!cancellationToken.IsCancellationRequested)
             {
                 PrintStatus();
-                await Task.Delay(TimeSpan.FromMilliseconds(ServerOptions.CameraHealth.PollIntervalMs), cancellationToken);
+                await Task.Delay(TimeSpan.FromMilliseconds(_serverOptions.CameraHealth.PollIntervalMs), cancellationToken);
             }
         }
 
-        public void PrintStatus() => monitorService?.PrintServerHealth(cancellationToken, this, ServerOptions.CameraHealth.RefreshConsoleOnUpdate);
+        /// <summary>
+        /// Prints the current server health status.
+        /// </summary>
+        public void PrintStatus() => _monitorService?.PrintServerHealth(_cancellationToken, this, _serverOptions.CameraHealth.RefreshConsoleOnUpdate);
 
+  
+        /// <summary>
+        /// Disposes of resources used by the service.
+        /// </summary>
         public void Dispose()
         {
-            cancellationTokenSource.Dispose();
-            incomingRequestThrottle.Dispose();
-            foreach (var semaphore in cameraSemaphores.Values) semaphore.Dispose();
-            foreach (var channel in frameProcessingChannels.Values) channel.Writer.TryComplete();
-            monitorService?.Dispose();
-            encoderChannel.Dispose();
+            if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0) return;
+
+            try
+            {
+                _cancellationTokenSource?.Dispose();
+                _incomingRequestThrottle?.Dispose();
+                foreach (var semaphore in _cameraSemaphores.Values)
+                {
+                    semaphore?.Dispose();
+                }
+                foreach (var channel in _frameProcessingChannels.Values)
+                {
+                    channel?.Writer.TryComplete();
+                }
+                _monitorService?.Dispose();
+                _encoderChannel?.Dispose();
+                _logger.LogInformation("Image Acquisition Service resources disposed successfully.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error disposing Image Acquisition Service resources.");
+            }
         }
     }
 }
