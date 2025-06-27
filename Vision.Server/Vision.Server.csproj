@@ -31,6 +31,7 @@
   <ItemGroup>
     <ProjectReference Include="..\ThirdParty\GenICam\GenICam.csproj" />
     <ProjectReference Include="..\ThirdParty\GigeVision.Core\GigeVision.Core.csproj" />
+    <ProjectReference Include="..\Vision.Rpc\Vision.Rpc.csproj" />
   </ItemGroup>
 
   <ItemGroup>

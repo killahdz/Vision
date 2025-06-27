@@ -19,6 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\IA.Vision.App\Vision.Server.csproj" />
+    <ProjectReference Include="..\Vision.Rpc\Vision.Rpc.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 
