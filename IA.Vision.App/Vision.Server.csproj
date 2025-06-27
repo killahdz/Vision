@@ -29,7 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\IA.Vision.Rpc\IA.Vision.Rpc.csproj" />
+    <ProjectReference Include="..\IA.Vision.Rpc\Vision.Rpc.csproj" />
     <ProjectReference Include="..\ThirdParty\GenICam\GenICam.csproj" />
     <ProjectReference Include="..\ThirdParty\GigeVision.Core\GigeVision.Core.csproj" />
   </ItemGroup>

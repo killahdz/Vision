@@ -1,19 +1,19 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.9.34723.18
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.33214.272
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ThirdParty", "ThirdParty", "{1395288A-DA32-458C-83D5-CFEE8ACF99B8}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "IA.Vision.Server", "IA.Vision.App\IA.Vision.Server.csproj", "{2D078ECB-E16D-4B3B-A644-564D736A3AF8}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Vision.Server", "IA.Vision.App\Vision.Server.csproj", "{2D078ECB-E16D-4B3B-A644-564D736A3AF8}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "IA.Vision.Rpc", "IA.Vision.Rpc\IA.Vision.Rpc.csproj", "{97226E0C-7E9A-49ED-9B51-91B5B90EA8C4}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Vision.Rpc", "IA.Vision.Rpc\Vision.Rpc.csproj", "{97226E0C-7E9A-49ED-9B51-91B5B90EA8C4}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GenICam", "ThirdParty\GenICam\GenICam.csproj", "{E2F5BC21-7BD0-4C32-A3D2-F10557F00DED}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GigeVision.Core", "ThirdParty\GigeVision.Core\GigeVision.Core.csproj", "{2A767BF4-1565-4E70-BF7E-1F343FA9A90A}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "IA.Vision.Tests", "IA.Vision.App.Tests\IA.Vision.Tests.csproj", "{D74E70E2-0B23-4430-BBAD-07C3051F67AF}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Vision.Tests", "IA.Vision.App.Tests\Vision.Tests.csproj", "{D74E70E2-0B23-4430-BBAD-07C3051F67AF}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{DC173497-0F7F-4AC8-A27C-120BA2B0BD2F}"
 	ProjectSection(SolutionItems) = preProject
