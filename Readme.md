@@ -112,7 +112,7 @@ All runtime behavior is controlled via `appsettings.json`:
 
 Licensed under the Apache License 2.0  
 © 2025 Daniel Kereama
-
+ 
 ---
 
 ## 👤 About the Author
