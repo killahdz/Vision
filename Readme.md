@@ -1,123 +1,132 @@
-# Vision Server – High-Performance Image Acquisition Platform
+# 👁️‍🗨️ Vision Server – High-Performance Image Acquisition Platform
 
-**Author**: Daniel Kereama  
-**License**: [Apache 2.0](./LICENCE.txt)  
-**Solution**: `ImageAcquisition.sln`
+**Author:** Daniel Kereama  
+**License:** Viewing Only – All Rights Reserved ([details](./LICENSE))  
+**Solution:** `ImageAcquisition.sln`
 
-![image](https://github.com/user-attachments/assets/be691e2e-9c0e-4421-8a84-f512182728d4)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/be691e2e-9c0e-4421-8a84-f512182728d4" alt="Vision Server Diagram" width="600"/>
+</p>
+
+---
 
 ## 🚀 Overview
 
-This repository contains a production-grade **vision acquisition server**, purpose-built for high-speed industrial environments such as **AI-powered grading and defect detection** in sawmills and manufacturing.
+Vision Server is a production-grade, high-throughput **vision acquisition platform** designed for industrial environments like **AI-powered grading and defect detection** in sawmills and manufacturing.  
+Built in C#, it leverages modern .NET technologies for real-time, fault-tolerant, multi-camera image capture and telemetry.
 
-The system listens for encoder-triggered image requests via gRPC and orchestrates image capture, telemetry, logging, and robust error handling across multiple industrial cameras.
+> ⚙️ Crafted from the ground up, this project is a showcase of Daniel Kereama’s expertise in robust, large-scale .NET systems, real-time communication, and industrial hardware integration.
 
-> ⚙️ Built from scratch in C#, this codebase is a showcase of Daniel Kereama’s architectural and implementation expertise in real-time, fault-tolerant .NET systems.
-
----
-
-## 📁 Projects
-
-| Project                | Description                                                                 |
-|------------------------|-----------------------------------------------------------------------------|
-| `Vision.App`        | Core host and service logic, including gRPC handling, telemetry, and DI     |
-| `Vision.Rpc`        | Protobuf/gRPC-generated contract services for encoder-image communication   |
-| `Vision.App.Tests`  | Unit test suite (in progress)                                               |
-| `ThirdParty`           | External dependencies or integrations (e.g., GeniCam/GigE Vision)           |
+**🔒 This codebase is provided for viewing purposes only. No copying, modification, or redistribution is permitted. Please see the [LICENSE](./LICENSE) file for details.**
 
 ---
 
-## 💡 Key Features
+## 📁 Projects Structure
 
-- **gRPC encoder stream ingestion** for real-time frame requests
-- **Multi-camera coordination** with per-device telemetry and retries
-- **Channel-based frame queues** with async processing per camera
-- **Dynamic acquisition modes** (`Run`, `Debug`, `Offline`)
-- **Structured logging** via Serilog and console refresh support
-- **Graceful shutdown** with error queues and retry logic
-- **Health monitoring** for encoder stream, cameras, and queues
-- **Flexible debug image saving**, file format toggles (RAW/PNG), and intelligent folder layout
+| Project              | Description                                                                 |
+|----------------------|-----------------------------------------------------------------------------|
+| `Vision.App`         | Core host and service logic – gRPC, telemetry, dependency injection         |
+| `Vision.Rpc`         | Protobuf/gRPC-generated contracts for encoder/image communication           |
+| `Vision.App.Tests`   | Unit tests (WIP)                                                            |
+| `ThirdParty`         | External dependencies/integrations (e.g., GeniCam/GigE Vision)              |
 
 ---
 
-## 🔧 Configuration Overview (`appsettings.json`)
+## ✨ Key Features
 
-All runtime behavior is controlled via `appsettings.json`:
+- ⚡ **gRPC encoder stream ingestion** for real-time frame requests
+- 🎥 **Multi-camera orchestration** with per-device telemetry & retries
+- 🌀 **Channel-based frame queues** and async processing per camera
+- 🔄 **Dynamic acquisition modes**: `Run`, `Debug`, `Offline`
+- 📊 **Structured logging** via Serilog with live console refresh
+- 🛑 **Graceful shutdown** with error queues and retry logic
+- 🩺 **Health monitoring** for streams, cameras, & queues
+- 💾 **Flexible debug image saving**, file format toggles (RAW/PNG), intelligent foldering
 
-### 🔌 ServerOptions
-- `IP` / `PortNumber`: Bind address and port (default `0.0.0.0:19002`)
-- `ImageAcquisitionMode`: Run, Debug, or Offline mode
-- `Incoming/OutgoingConcurrentRequestLimit`: Request throttling
-- `BufferSize`: Retention buffer (~5s at 460)
+---
+
+## ⚙️ Configuration (`appsettings.json`)
+
+All runtime behavior is configured via `appsettings.json`:
+
+### 🔌 `ServerOptions`
+- `IP` / `PortNumber`: Bind IP and port (default `0.0.0.0:19002`)
+- `ImageAcquisitionMode`: Run, Debug, or Offline
+- `Incoming/OutgoingConcurrentRequestLimit`: Throttling
+- `BufferSize`: Retention buffer size (~5s at 460 fps)
 - `LoggingLevel`: Verbosity (`Trace` → `Critical`)
 - `ImageProcessingClientSkip`: Toggle gRPC downstream sending
 
-### 📸 Cameras
-- Define up to **8 concurrent GigE cameras** in `CameraOptions.Cameras[]`
-- Each camera has:
-  - `Id`, `Name`, `CameraAddress`, and `ReceiverAddress/Port`
+### 📸 `CameraOptions.Cameras[]`
+- Up to **8 concurrent GigE cameras**
+- Each with:
+  - `Id`, `Name`, `CameraAddress`, `ReceiverAddress/Port`
   - `Resolution` (`Width`, `Height`), `OffsetX/Y`
   - Unique `MacAddress`, `Serial`
-  - Visual `Accent` for diagnostics and display
+  - Visual `Accent` for diagnostics
 
 ### 🧠 Subsystems
-- `RetrySettings`: Millisecond delays between retries
-- `FrameProcessingChannel`: Frame queue capacity & overflow mode (`DropOldest`)
-- `DebugImageSettings`: Save PNG/RAW images into `DebugImages/{Date}/{CameraId}/`
-- `FileWriteQueue`: Control concurrency and format (`SaveRaw`, `SavePng`)
-- `StreamMonitor`: Periodic encoder health polling (default: 7s)
-- `CameraHealth`: Per-camera status checks (default: 1s, with console refresh)
-- `EncoderStreamSettings`: Defines encoder stream IP/port and retry backoff
+- `RetrySettings`: Delay between retries (ms)
+- `FrameProcessingChannel`: Queue capacity & overflow policy (`DropOldest`)
+- `DebugImageSettings`: Save PNG/RAW images to `DebugImages/{Date}/{CameraId}/`
+- `FileWriteQueue`: Concurrency and format toggles (`SaveRaw`, `SavePng`)
+- `StreamMonitor`: Encoder health polling (default: 7s)
+- `CameraHealth`: Per-camera checks (default: 1s, with console refresh)
+- `EncoderStreamSettings`: Encoder IP/port, retry backoff
 
 ---
 
-## 🛠️ Technologies Used
+## 🛠️ Technologies
 
-- [.NET 8](https://dotnet.microsoft.com/en-us/download)
-- **gRPC** for streaming control
-- **Serilog** for structured file-based logging
-- **System.Threading.Channels**, `SemaphoreSlim`, `ConcurrentDictionary`
-- **Protobuf** contract definitions (`Vision.Rpc`)
-- Native SDKs for industrial camera capture (GeniCam/GigE Vision)
+- ![dotnet](https://img.shields.io/badge/.NET-8.0-blue?logo=dotnet) [.NET 8](https://dotnet.microsoft.com/en-us/download)
+- [gRPC](https://grpc.io/) for streaming control
+- [Serilog](https://serilog.net/) for structured logging
+- `System.Threading.Channels`, `SemaphoreSlim`, `ConcurrentDictionary`
+- [Protobuf](https://developers.google.com/protocol-buffers)
+- Native SDKs for GigE Vision (GeniCam, etc.)
 
 ---
 
 ## 🔍 How It Works
 
-1. **Startup**: Cameras connect via GigE with validation and retry logic.
-2. **Streaming**: Encoder sends ticks (via gRPC) triggers captures on movement.
-3. **Acquisition**: Server captures frames, queues for processing or saving.
-4. **Telemetry**: All activity tracked and logged by `VisionMonitorService`.
-5. **Shutdown**: Channels flushed, hardware connections disposed, errors saved.
+1. **Startup:** Cameras connect via GigE, with validation and retry logic.
+2. **Streaming:** Encoder sends gRPC ticks, triggering camera captures.
+3. **Acquisition:** Frames are captured, queued, and processed or saved.
+4. **Telemetry:** All activity tracked and logged by `VisionMonitorService`.
+5. **Shutdown:** Channels are flushed, hardware disposed, errors persisted.
 
 ---
 
 ## 📦 Getting Started
 
-1. Clone the repository:
-   `git clone https://github.com/killahdz/VisionServer.git`
+> **Code in this repository is for viewing only.**  
+> No permission is granted to copy, modify, build, or run the software.
 
-2. Open `ImageAcquisition.sln` in Visual Studio or Rider
+1. **Browse the repository:**  
+   - Explore the source in your browser or text viewer.
+   - Review `ImageAcquisition.sln` for solution structure.
+   - Inspect `appsettings.json` for configuration examples.
 
-3. Configure:
-   - Update `appsettings.json` with your camera IPs, encoder address, and operational preferences
-
-4. Build & Run:
-   - Start `Vision.App`
-   - Connect encoder stream and camera hardware
+2. **Interested in use or collaboration?**  
+   - Contact the author for license requests or commercial inquiries.
 
 ---
 
 ## 📄 License
 
-Licensed under the Apache License 2.0  
+**Viewing Only – All Rights Reserved**  
+This code is made available for reference and inspection purposes only.  
+No permission is granted to copy, modify, distribute, or use in any form without written consent.  
+See [LICENSE](./LICENSE) for full details.  
 © 2025 Daniel Kereama
- 
+
 ---
 
 ## 👤 About the Author
 
-**Daniel Kereama** is a senior .NET engineer with 20+ years of experience in enterprise-grade systems, real-time image processing, and automation. This system showcases expertise in performance-critical applications, multithreading, and industrial integration across hardware and software domains.
+**Daniel Kereama**  
+Senior .NET engineer with 20+ years' experience in enterprise systems, real-time image processing, and automation.  
+This project demonstrates advanced skills in high-performance, multithreaded, and hardware-integrated applications.
 
 ---
 
@@ -125,3 +134,5 @@ Licensed under the Apache License 2.0
 
 - GitHub: [github.com/killahdz](https://github.com/killahdz)
 - LinkedIn: [linkedin.com/in/danielkereama](https://linkedin.com/in/danielkereama)
+
+---
