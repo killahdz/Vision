@@ -20,9 +20,9 @@ The system listens for encoder-triggered image requests via gRPC and orchestrate
 
 | Project                | Description                                                                 |
 |------------------------|-----------------------------------------------------------------------------|
-| `IA.Vision.App`        | Core host and service logic, including gRPC handling, telemetry, and DI     |
-| `IA.Vision.Rpc`        | Protobuf/gRPC-generated contract services for encoder-image communication   |
-| `IA.Vision.App.Tests`  | Unit test suite (in progress)                                               |
+| `Vision.App`        | Core host and service logic, including gRPC handling, telemetry, and DI     |
+| `Vision.Rpc`        | Protobuf/gRPC-generated contract services for encoder-image communication   |
+| `Vision.App.Tests`  | Unit test suite (in progress)                                               |
 | `ThirdParty`           | External dependencies or integrations (e.g., GeniCam/GigE Vision)           |
 
 ---
@@ -77,7 +77,7 @@ All runtime behavior is controlled via `appsettings.json`:
 - **gRPC** for streaming control
 - **Serilog** for structured file-based logging
 - **System.Threading.Channels**, `SemaphoreSlim`, `ConcurrentDictionary`
-- **Protobuf** contract definitions (`IA.Vision.Rpc`)
+- **Protobuf** contract definitions (`Vision.Rpc`)
 - Native SDKs for industrial camera capture (GeniCam/GigE Vision)
 
 ---
@@ -103,7 +103,7 @@ All runtime behavior is controlled via `appsettings.json`:
    - Update `appsettings.json` with your camera IPs, encoder address, and operational preferences
 
 4. Build & Run:
-   - Start `IA.Vision.App`
+   - Start `Vision.App`
    - Connect encoder stream and camera hardware
 
 ---
