@@ -1,4 +1,4 @@
-# 👁️‍🗨️ Vision Server – High-Performance Image Acquisition Platform
+# 👁️‍🗨️ GigE-Vision Server – High-Performance Image Acquisition Platform
 
 **Author:** Daniel Kereama  
 **License:** Viewing Only – All Rights Reserved ([details](./LICENSE))  
